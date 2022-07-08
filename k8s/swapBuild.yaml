@@ -1,0 +1,22 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.21.2/2021-07-05/bin/linux/amd64/kubectl
+      - aws eks update-kubeconfig --region ap-southeast-2 --name demo-cluster
+      - aws eks update-kubeconfig --region ap-southeast-2 --name demo-cluster --role-arn arn:aws:iam::790359191027:role/adminrole
+  pre_build:
+    commands:
+      - green=$(kubectl get svc green -n demo -o json | jq -r '.spec.selector.app')
+      - blue=$(kubectl get svc blue -n demo -o json | jq -r '.spec.selector.app')
+      - cd ./app/k8s
+      - cat change.json | jq --arg value "$green" '.spec.selector.app = $value' > changetogreen.json
+      - cat change.json | jq --arg value "$blue" '.spec.selector.app = $value' > changetoblue.json
+      - cat ./changetogreen.json
+      - cat ./changetoblue.json
+      - echo swapping to green deployment
+  build:
+    commands:
+      - kubectl patch svc blue -n demo --patch "$(cat ./changetogreen.json)"
+      - kubectl patch svc green -n demo --patch "$(cat ./changetoblue.json)"

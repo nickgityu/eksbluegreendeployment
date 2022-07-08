@@ -1,0 +1,36 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.21.2/2021-07-05/bin/linux/amd64/kubectl
+      - apt install jq
+      - aws eks update-kubeconfig --region ap-southeast-2 --name demo-cluster
+      - aws eks update-kubeconfig --region ap-southeast-2 --name demo-cluster --role-arn arn:aws:iam::790359191027:role/adminrole
+  pre_build:
+    commands:
+      - export TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION}
+      - cd ./app/bluegreen-code
+      - aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin 790359191027.dkr.ecr.ap-southeast-2.amazonaws.com
+      - docker build . -t 790359191027.dkr.ecr.ap-southeast-2.amazonaws.com/demo:$TAG
+      - docker push 790359191027.dkr.ecr.ap-southeast-2.amazonaws.com/demo:$TAG
+      - cd ../..
+  build:
+    commands:
+      - kubectl apply -f ./app/k8s/namespace.yaml
+      - deployment=$(kubectl get deployment -n demo)
+      - rollback=$(cat ./app/k8s/rollback.json | jq '.rollBack')
+      - selector=$(kubectl get svc green -n demo -o json | jq -r '.spec.selector.app')
+      - echo $selector
+      - echo $rollback
+      - | 
+        if [ ${deployment}=0 ]; then 
+          kubectl apply -f ./app/k8s/k8s.yaml;
+        fi 
+      - |
+        if [ ${rollback} -eq 0 ]; then
+          kubectl set image deployment/$selector -n demo $selector=790359191027.dkr.ecr.ap-southeast-2.amazonaws.com/demo:$TAG;
+          kubectl scale --replicas=2 deployment/$selector -n demo;  
+        fi
+      - kubectl get deploy -n demo
+      - kubectl get svc -n demo
